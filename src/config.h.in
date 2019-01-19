@@ -1,0 +1,4 @@
+#pragma once
+
+static const char* ssid = "YOUR_SSID"; // FIXME: put your wifi SSID here
+static const char* password = "YOUR_PASSWORD"; // FIXME: put your wifi password here

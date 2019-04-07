@@ -29,27 +29,26 @@
 
 #include "config.h" // if config.h is missing, copy config.h.in to config.h and adjust for your wifi!
 
-static constexpr uint8_t MAX_SRV_CLIENTS { 4 }; // how many clients should be able to telnet to this ESP8266
-static constexpr size_t BUFFER_SIZE { 1536 };
 
 static WiFiServer server { 23 };
 static WiFiClient serverClients[MAX_SRV_CLIENTS];
+static uint32_t connection_time[MAX_SRV_CLIENTS];
 static uint8_t serial_buf[BUFFER_SIZE];
 
 void setup() {
     WiFi.begin(ssid, password);
-    for (uint8_t i = 0; WiFi.status() != WL_CONNECTED && i < 20; ++i) {
-        delay(500);
+    for (uint8_t i { 0 }; WiFi.status() != WL_CONNECTED && i < 20; ++i) {
+        ::delay(500);
     }
     if (WiFi.status() != WL_CONNECTED) {
         while (true) {
-            delay(500);
+            ::delay(500);
         }
     }
 
     /* start UART and server */
     Serial.setRxBufferSize(BUFFER_SIZE);
-    Serial.begin(2000000UL);
+    Serial.begin(UART_BAUDRATE);
 
     server.begin();
     server.setNoDelay(true);
@@ -58,13 +57,16 @@ void setup() {
 void loop() {
     /* check if there are any new clients */
     if (server.hasClient()) {
-        for (uint8_t i = 0; i < MAX_SRV_CLIENTS; i++) {
+        for (uint8_t i { 0 }; i < MAX_SRV_CLIENTS; ++i) {
             /* find free/disconnected spot */
             if (!serverClients[i].connected()) {
                 serverClients[i].stop();
 
                 serverClients[i] = server.available();
-                serverClients[i].write("\xff\xfb\x01", 3); // suppress local echo
+                connection_time[i] = ::millis();
+
+                /* suppress local echo */
+                serverClients[i].write("\xff\xfb\x01", 3);
                 serverClients[i].flush();
                 serverClients[i].write("\xff\xfe\x01", 3);
                 serverClients[i].flush();
@@ -81,15 +83,16 @@ void loop() {
         serverClient.stop();
     }
     /* check clients for data */
-    for (uint8_t i = 0; i < MAX_SRV_CLIENTS; i++) {
+    for (uint8_t i { 0 }; i < MAX_SRV_CLIENTS; ++i) {
         if (serverClients[i].connected()) {
             while (serverClients[i].available()) {
                 /* get data from the telnet client and push it to the UART */
+                const uint32_t dt { ::millis() - connection_time[i] };
                 const uint8_t tmp { static_cast<uint8_t>(serverClients[i].read()) };
-                if (tmp == 0xff) {
-                    /* discard any telnet protocl traffic */
+                if (dt < TELNET_DISCARD_TIME && tmp == 0xff) {
+                    /* discard telnet protocl traffic during the first second */
                     while (serverClients[i].available() < 2) {
-                        delay(0);
+                        ::delay(0);
                     }
                     serverClients[i].read();
                     serverClients[i].read();
@@ -104,10 +107,10 @@ void loop() {
         const size_t len { std::min(static_cast<size_t>(Serial.available()), BUFFER_SIZE) };
         Serial.readBytes(serial_buf, len);
         /* push UART data to all connected telnet clients */
-        for (uint8_t i = 0; i < MAX_SRV_CLIENTS; i++) {
+        for (uint8_t i { 0 }; i < MAX_SRV_CLIENTS; ++i) {
             if (serverClients[i].connected()) {
                 serverClients[i].write(serial_buf, len);
-                delay(0);
+                ::delay(0);
             }
         }
     }
